@@ -67,17 +67,15 @@ An **Agent Harness** is the complete infrastructure that wraps around an LLM to 
 OpenHarness is an open-source Python implementation designed for **researchers, builders, and the community**:
 
 - **Understand** how production AI agents work under the hood
-- **Experiment** with new tools, skills, and agent coordination patterns
-- **Extend** the harness with custom plugins, providers, and knowledge
-- **Build** domain-specific agents on top of a proven architecture
-
-> *"Prompt plumbing 'agents' are the fantasy of programmers who don't train models. Agency is learned, not programmed. The engineer's job is the harness — not the intelligence."*
+- **Experiment** with cutting-edge tools, skills, and agent coordination patterns
+- **Extend** the harness with custom plugins, providers, and domain knowledge
+- **Build** Build specialized agents on top of proven architecture
 
 ---
 
 ## 📰 What's New
 
-- **2025-04-01** 🎨 **v0.1.0** — Initial open-source release with full Harness architecture
+- **2025-04-01** 🎨 **v0.1.0** — Initial open-source release featuring complete Harness architecture: **OpenHarness**
 
 ---
 
