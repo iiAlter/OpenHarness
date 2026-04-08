@@ -150,10 +150,25 @@ class ChannelManager:
             except ImportError as e:
                 logger.warning("Matrix channel not available: {}", e)
 
+        # API channel
+        if self.config.channels.api.enabled:
+            try:
+                from openharness.channels.impl.api import APIChannel
+                self.channels["api"] = APIChannel(
+                    self.config.channels.api, self.bus
+                )
+                logger.info("API channel enabled on {}:{}",
+                             self.config.channels.api.host,
+                             self.config.channels.api.port)
+            except ImportError as e:
+                logger.warning("API channel not available: {}", e)
+
         self._validate_allow_from()
 
     def _validate_allow_from(self) -> None:
         for name, ch in self.channels.items():
+            if name == "api":
+                continue  # API uses token auth, not allow_from
             if getattr(ch.config, "allow_from", None) == []:
                 raise SystemExit(
                     f'Error: "{name}" has empty allowFrom (denies all). '
