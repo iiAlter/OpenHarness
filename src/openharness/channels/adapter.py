@@ -232,6 +232,14 @@ class SessionAwareBridge:
         finally:
             self._running = False
 
+    async def restore_session(self, session_key: str, session_id: str) -> bool:
+        """Restore a session from disk. Returns True if session was found and restored."""
+        try:
+            await self._restore_session(session_key, session_id)
+            return True
+        except Exception:
+            return False
+
     # ------------------------------------------------------------------
     # Route loop
     # ------------------------------------------------------------------
@@ -308,6 +316,8 @@ class SessionAwareBridge:
         engine = await self._get_or_create_session_engine(session_key)
         self._session_last_active[session_key] = time.time()
 
+        msg_id = msg.metadata.get("_msg_id", "")
+
         try:
             async for event in engine.submit_message(msg.content):
                 if isinstance(event, AssistantTextDelta):
@@ -318,6 +328,7 @@ class SessionAwareBridge:
                         metadata={
                             "_session_key": session_key,
                             "_streaming": True,
+                            "_msg_id": msg_id,
                         },
                     )
                     await self._bus.publish_outbound(outbound)
@@ -331,6 +342,7 @@ class SessionAwareBridge:
                             "_session_key": session_key,
                             "_streaming": True,
                             "_streaming_final": True,
+                            "_msg_id": msg_id,
                         },
                     )
                     await self._bus.publish_outbound(outbound)
@@ -347,6 +359,7 @@ class SessionAwareBridge:
                     "_session_key": session_key,
                     "_streaming": True,
                     "_streaming_final": True,
+                    "_msg_id": msg_id,
                 },
             )
             await self._bus.publish_outbound(error_outbound)
@@ -454,11 +467,11 @@ class SessionAwareBridge:
 
             save_session_snapshot(
                 cwd=self._cwd,
-                model=engine._model,
-                system_prompt=engine._system_prompt,
+                session_id=session_key,
+                model=getattr(engine, "_model", getattr(self._settings, "model", "claude-sonnet-4-20250514")),
+                system_prompt=getattr(engine, "_system_prompt", getattr(self._settings, "system_prompt", "")),
                 messages=engine.messages,
                 usage=engine.total_usage,
-                session_id=session_key,
             )
             logger.debug("SessionAwareBridge: saved session %s", session_key)
         except Exception:
