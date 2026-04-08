@@ -243,7 +243,20 @@ The `SessionAwareBridge` constructs `QueryEngine` instances directly, bypassing 
 
 ### Session persistence directory
 
-API channel sessions use a dedicated `cwd` value for `session_storage` functions: `Path.home() / ".openharness" / "api-sessions"`. This isolates API sessions from CLI sessions and avoids collisions with project-based session directories.
+API channel sessions use a dedicated `cwd` value for `session_storage` functions: `Path.home() / ".openharness" / "api-sessions"`. Note that `session_storage.get_project_session_dir(cwd)` uses `cwd` as a namespace key — it computes a directory as `get_sessions_dir() / "api-sessions-<hash>"` under the existing sessions hierarchy. The actual files end up under `~/.openharness/data/sessions/`, isolated from CLI project-based sessions.
+
+### Streaming delta metadata
+
+Streaming `OutboundMessage`s from the bridge carry `metadata["_streaming"] = True` and `metadata["_streaming_final"] = True` on the last chunk. The `ChannelManager._dispatch_outbound()` must pass these through without filtering (they are not `_progress` or `_tool_hint` messages). The API channel's `send()` method assembles streaming chunks into WebSocket `reply_delta` messages, and the final chunk into a `reply` message.
+
+### WebSocket send exception handling
+
+If `APIChannel.send()` encounters a `ws.send()` exception (e.g., connection closed mid-write), it should:
+1. Remove the client from `ws_map` (stale connection)
+2. Log a warning
+3. Do NOT retry — the client must reconnect
+
+This prevents stale connections from accumulating in `ws_map`.
 
 ### Idle timeout and cleanup
 
@@ -314,7 +327,9 @@ class APIChannel(BaseChannel):
 
 ## 7. Configuration
 
-Add `ApiChannelConfig` to the existing config schema module (wherever other channel configs like `TelegramConfig` are defined):
+### Config module
+
+All channel configs (TelegramConfig, DiscordConfig, etc.) live in `openharness.config.schema` which is imported by `ChannelManager`. This module is not currently in the source tree at `src/openharness/config/schema.py` (it may be generated or installed separately). The `ApiChannelConfig` class must be added to this same module, wherever it is defined at runtime. If `schema.py` needs to be created in `src/openharness/config/`, it should contain all the channel config classes referenced by `manager.py`.
 
 ```python
 class ApiChannelConfig(BaseModel):
@@ -324,12 +339,25 @@ class ApiChannelConfig(BaseModel):
     port: int = 8080
     idle_timeout_minutes: int = 30
     session_retention_days: int = 7
-    allow_from: list[str] = []  # empty = deny all, must configure explicitly
+    allow_from: list[str] = ["*"]  # configure to restrict access
 ```
 
-Note: `allow_from` defaults to `[]` (deny all). The user must explicitly configure allowed client IDs or set `["*"]` to allow all. This is more secure for a network-exposed API.
+Note: `allow_from` defaults to `["*"]` (allow all) to be consistent with the existing `_validate_allow_from()` in `ChannelManager`, which raises `SystemExit` on empty lists. Users who want to restrict access should set specific client IDs. A warning log should be emitted at startup when `["*"]` is used for the API channel, advising the user to configure specific client IDs.
 
-Register in `ChannelManager._init_channels()`, following the existing pattern with `try/except ImportError`:
+### _validate_allow_from update
+
+The existing `_validate_allow_from()` in `ChannelManager` must be updated to skip the API channel, since the API channel uses token-based authentication (`api_token`) as its primary access control — not `allow_from`. The `allow_from` list for the API channel is an optional additional restriction, not the primary gate. Add to the validation:
+
+```python
+def _validate_allow_from(self) -> None:
+    for name, ch in self.channels.items():
+        if name == "api":
+            continue  # API uses token auth, not allow_from
+        if getattr(ch.config, "allow_from", None) == []:
+            raise SystemExit(...)
+```
+
+Register API channel in `ChannelManager._init_channels()`, following the existing pattern with `try/except ImportError`:
 
 ```python
 if self.config.channels.api.enabled:
@@ -367,7 +395,7 @@ if self.config.channels.api.enabled:
 |------|--------|
 | `src/openharness/channels/impl/api.py` | **New** — APIChannel implementation (FastAPI HTTP + WS) |
 | `src/openharness/channels/adapter.py` | **Modify** — Add SessionAwareBridge alongside existing ChannelBridge |
-| `src/openharness/channels/impl/manager.py` | **Modify** — Register APIChannel in `_init_channels()` |
+| `src/openharness/channels/impl/manager.py` | **Modify** — Register APIChannel in `_init_channels()`, skip API in `_validate_allow_from()` |
 | `src/openharness/config/schema.py` (or equivalent) | **Modify** — Add ApiChannelConfig |
 | `pyproject.toml` | **Modify** — Add dependencies: `fastapi`, `uvicorn[standard]` |
 
