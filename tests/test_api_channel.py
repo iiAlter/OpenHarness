@@ -294,3 +294,93 @@ class TestSessionsEndpoint:
         body = resp.json()
         assert "sessions" in body
         assert isinstance(body["sessions"], list)
+
+
+# ---------------------------------------------------------------------------
+# 7. E2E smoke test -- full message round-trip
+# ---------------------------------------------------------------------------
+
+
+class TestAPIChannelEndToEnd:
+    """Integration test: HTTP send -> bus -> reply via send() -> WS receive."""
+
+    @pytest.mark.asyncio
+    async def test_full_message_round_trip(self):
+        """Send a message via HTTP, verify it hits the bus, simulate a reply, verify WS receives it."""
+        from openharness.channels.impl.api import APIChannel
+
+        bus = MessageBus()
+        config = _make_config()
+        channel = APIChannel(config, bus)
+
+        # Set up a mock WebSocket
+        mock_ws = AsyncMock()
+        channel._ws_map["client-a"] = mock_ws
+
+        # Send message via HTTP (raw app, no auth middleware)
+        transport = httpx.ASGITransport(app=channel._app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.post(
+                "/api/v1/send",
+                json={"client_id": "client-a", "content": "hello"},
+            )
+            assert resp.status_code == 200
+            msg_id = resp.json()["msg_id"]
+
+        # Verify inbound message on bus
+        assert bus.inbound.qsize() == 1
+        inbound = bus.inbound.get_nowait()
+        assert inbound.content == "hello"
+        assert inbound.metadata["_msg_id"] == msg_id
+
+        # Simulate bridge sending a reply through the channel
+        await channel.send(OutboundMessage(
+            channel="api",
+            chat_id="client-a",
+            content="Hello! How can I help?",
+            metadata={"_msg_id": msg_id, "_session_key": "api:client-a"},
+        ))
+
+        # Verify WS received the reply
+        mock_ws.send_json.assert_called()
+        calls = mock_ws.send_json.call_args_list
+        sent = calls[-1][0][0]
+        assert sent["type"] == "reply"
+        assert sent["content"] == "Hello! How can I help?"
+        assert sent["msg_id"] == msg_id
+
+    @pytest.mark.asyncio
+    async def test_streaming_round_trip(self):
+        """Verify streaming deltas are delivered via WS."""
+        from openharness.channels.impl.api import APIChannel
+
+        bus = MessageBus()
+        config = _make_config()
+        channel = APIChannel(config, bus)
+
+        mock_ws = AsyncMock()
+        channel._ws_map["client-a"] = mock_ws
+
+        # Simulate streaming deltas from bridge
+        await channel.send(OutboundMessage(
+            channel="api", chat_id="client-a", content="Hello",
+            metadata={"_msg_id": "m1", "_streaming": True, "_session_key": "api:client-a"},
+        ))
+        await channel.send(OutboundMessage(
+            channel="api", chat_id="client-a", content=" world",
+            metadata={"_msg_id": "m1", "_streaming": True, "_session_key": "api:client-a"},
+        ))
+        await channel.send(OutboundMessage(
+            channel="api", chat_id="client-a", content="Hello world",
+            metadata={
+                "_msg_id": "m1",
+                "_streaming": True,
+                "_streaming_final": True,
+                "_session_key": "api:client-a",
+            },
+        ))
+
+        calls = mock_ws.send_json.call_args_list
+        types = [c[0][0]["type"] for c in calls]
+        assert "reply_delta" in types
+        assert "reply" in types
