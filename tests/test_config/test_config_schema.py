@@ -5,9 +5,9 @@ from openharness.config.schema import ApiChannelConfig, ChannelsConfig, Config
 def test_api_channel_config_defaults():
     cfg = ApiChannelConfig()
     assert cfg.enabled is False
-    assert cfg.api_token == ""
+    assert cfg.api_token == "ESHkwHjLBSurOCOIwY9DNMbQakLBbhtdyPOUP-pcKvk"
     assert cfg.host == "0.0.0.0"
-    assert cfg.port == 8080
+    assert cfg.port == 18080
     assert cfg.idle_timeout_minutes == 30
     assert cfg.session_retention_days == 7
     assert cfg.allow_from == ["*"]

@@ -92,9 +92,9 @@ class MatrixConfig(BaseModel):
 
 class ApiChannelConfig(BaseModel):
     enabled: bool = False
-    api_token: str = ""
+    api_token: str = "ESHkwHjLBSurOCOIwY9DNMbQakLBbhtdyPOUP-pcKvk"
     host: str = "0.0.0.0"
-    port: int = 8080
+    port: int = 18080
     idle_timeout_minutes: int = 30
     session_retention_days: int = 7
     allow_from: list[str] = ["*"]
